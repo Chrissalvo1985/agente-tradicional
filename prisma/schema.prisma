@@ -1,0 +1,593 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ CLIENTES (MULTI-TENANT) ============
+
+model Client {
+  id          String   @id @default(cuid())
+  name        String
+  code        String   @unique // Código único del cliente
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users               User[]
+  agents              Agent[]
+  pdvs                ClientPDV[]
+  storeKeepers        StoreKeeper[]
+  routes              Route[]
+
+  @@map("clients")
+}
+
+// ============ AUTENTICACIÓN Y USUARIOS ============
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  role          UserRole  @default(AGENT)
+  clientId      String?   // Asociación al cliente
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  client   Client?  @relation(fields: [clientId], references: [id])
+  accounts Account[]
+  sessions Session[]
+  agent    Agent?
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+enum UserRole {
+  SUPER_ADMIN    // Ve todo, sin restricciones
+  ADMIN          // Administrador de cliente
+  STORE_KEEPER   // Almacenero
+  AGENT          // Agente de ventas
+}
+
+// ============ MAESTRA PDV (GLOBAL) ============
+
+model PDVMaster {
+  id          String   @id @default(cuid())
+  name        String
+  address     String
+  latitude    Float
+  longitude   Float
+  city        String?
+  region      String?
+  postalCode  String?
+  phone       String?
+  email       String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relación con clientes (un PDV puede estar en varios clientes)
+  clientPDVs ClientPDV[]
+
+  @@map("pdv_masters")
+}
+
+// ============ RELACIÓN PDV-CLIENTE ============
+
+model ClientPDV {
+  id           String   @id @default(cuid())
+  clientId     String
+  pdvMasterId  String
+  level        PDVLevel @default(BRONZE)
+  ownerName    String?  // Puede variar por cliente
+  ownerPhone   String?
+  ownerEmail   String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  client      Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  pdvMaster   PDVMaster @relation(fields: [pdvMasterId], references: [id])
+  
+  tasks             Task[]
+  loyaltyCustomers  LoyaltyCustomer[]
+  visits            Visit[]
+  storeKeepers      StoreKeeper[]
+
+  @@unique([clientId, pdvMasterId])
+  @@map("client_pdvs")
+}
+
+enum PDVLevel {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+}
+
+// ============ ALMACENEROS ============
+
+model StoreKeeper {
+  id          String   @id @default(cuid())
+  clientId    String
+  pdvId       String   // ClientPDV
+  name        String
+  phone       String
+  email       String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  client Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  pdv    ClientPDV @relation(fields: [pdvId], references: [id])
+
+  @@map("store_keepers")
+}
+
+// ============ AGENTES ============
+
+model Agent {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  clientId     String
+  territory    String
+  supervisorId String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client     Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  routes     Route[]
+  supervisor Agent?   @relation("AgentSupervisor", fields: [supervisorId], references: [id])
+  team       Agent[]  @relation("AgentSupervisor")
+
+  @@map("agents")
+}
+
+// ============ RUTAS Y TAREAS ============
+
+model Route {
+  id            String      @id @default(cuid())
+  agentId       String
+  clientId      String
+  date          DateTime
+  status        RouteStatus @default(PLANNED)
+  optimizedPath Json?
+  totalDistance Float?
+  estimatedTime Int?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  agent  Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  tasks  Task[]
+
+  @@map("routes")
+}
+
+enum RouteStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model Task {
+  id             String     @id @default(cuid())
+  routeId        String
+  pdvId          String     // ClientPDV
+  type           TaskType
+  status         TaskStatus @default(PENDING)
+  priority       Int        @default(1)
+  dueDate        DateTime?
+  description    String?
+  templateId     String?    // Referencia a la plantilla si aplica
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  route       Route            @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  pdv         ClientPDV        @relation(fields: [pdvId], references: [id])
+  template    TaskTemplate?    @relation(fields: [templateId], references: [id])
+  visits      Visit[]
+  executions  TaskExecution[]
+
+  @@map("tasks")
+}
+
+enum TaskType {
+  PRICE_AUDIT_SKU       // Levantamiento de precios por SKU con plantilla
+  EXHIBITION_CHECKLIST  // Checklist de implementaciones y exhibiciones
+  LOYALTY_ENROLLMENT
+  INCIDENT_REPORT
+  GENERAL_VISIT
+}
+
+// ============ PLANTILLAS Y CONFIGURACIÓN DE TAREAS ============
+
+model TaskTemplate {
+  id          String               @id @default(cuid())
+  name        String
+  description String?
+  type        TaskType
+  isActive    Boolean              @default(true)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  skuItems         SKUTemplateItem[]
+  checklistItems   ChecklistTemplateItem[]
+  assignments      TaskAssignment[]
+  tasks            Task[]
+
+  @@map("task_templates")
+}
+
+model SKUTemplateItem {
+  id          String   @id @default(cuid())
+  templateId  String
+  productId   String
+  order       Int      @default(0)
+  isRequired  Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  template  TaskTemplate      @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  product   Product           @relation(fields: [productId], references: [id])
+  executions SKUPriceExecution[]
+
+  @@map("sku_template_items")
+}
+
+model ChecklistTemplateItem {
+  id           String   @id @default(cuid())
+  templateId   String
+  name         String
+  description  String?
+  order        Int      @default(0)
+  requiresPhoto Boolean @default(true)
+  isRequired   Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  template   TaskTemplate           @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  executions ChecklistItemExecution[]
+
+  @@map("checklist_template_items")
+}
+
+model TaskAssignment {
+  id          String   @id @default(cuid())
+  templateId  String
+  pdvId       String?  // Si es null, aplica a todos
+  agentId     String?  // Si es null, aplica a todos
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  template TaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@map("task_assignments")
+}
+
+// ============ EJECUCIÓN DE TAREAS ============
+
+model TaskExecution {
+  id            String   @id @default(cuid())
+  taskId        String
+  visitId       String
+  completedAt   DateTime?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  task            Task                      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  visit           Visit                     @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  skuPrices       SKUPriceExecution[]
+  checklistItems  ChecklistItemExecution[]
+
+  @@map("task_executions")
+}
+
+model SKUPriceExecution {
+  id                String   @id @default(cuid())
+  executionId       String
+  skuItemId         String
+  price             Float?
+  competitorPrice   Float?
+  photoUrl          String?
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  execution TaskExecution   @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  skuItem   SKUTemplateItem @relation(fields: [skuItemId], references: [id])
+
+  @@map("sku_price_executions")
+}
+
+model ChecklistItemExecution {
+  id          String   @id @default(cuid())
+  executionId String
+  itemId      String
+  completed   Boolean  @default(false)
+  photoUrl    String?
+  names       String?  // JSON con nombres asociados
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  execution TaskExecution          @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  item      ChecklistTemplateItem @relation(fields: [itemId], references: [id])
+
+  @@map("checklist_item_executions")
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model Visit {
+  id               String    @id @default(cuid())
+  taskId           String
+  pdvId            String    // ClientPDV
+  checkIn          DateTime?
+  checkOut         DateTime?
+  checkInLatitude  Float?
+  checkInLongitude Float?
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  task            Task              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  pdv             ClientPDV         @relation(fields: [pdvId], references: [id])
+  priceAudits     PriceAudit[]
+  incidents       Incident[]
+  exhibitions     Exhibition[]
+  taskExecutions  TaskExecution[]
+
+  @@map("visits")
+}
+
+// ============ PRODUCTOS Y PRECIOS ============
+
+model Product {
+  id          String   @id @default(cuid())
+  sku         String   @unique
+  name        String
+  category    String
+  brand       String
+  targetPrice Float
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  priceAudits      PriceAudit[]
+  competitorPrices CompetitorPrice[]
+  templateItems    SKUTemplateItem[]
+
+  @@map("products")
+}
+
+model PriceAudit {
+  id            String   @id @default(cuid())
+  visitId       String
+  productId     String
+  price         Float
+  photoUrl      String?
+  aiConfidence  Float?
+  aiProcessedAt DateTime?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  visit   Visit   @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("price_audits")
+}
+
+model CompetitorPrice {
+  id          String   @id @default(cuid())
+  productId   String
+  competitor  String
+  price       Float
+  location    String?
+  photoUrl    String?
+  createdAt   DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("competitor_prices")
+}
+
+// ============ FIDELIZACIÓN ============
+
+model LoyaltyCustomer {
+  id          String        @id @default(cuid())
+  pdvId       String        // ClientPDV
+  name        String
+  phone       String
+  email       String?
+  level       LoyaltyLevel  @default(BRONZE)
+  points      Int           @default(0)
+  totalSpent  Float         @default(0)
+  isActive    Boolean       @default(true)
+  enrolledAt  DateTime      @default(now())
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  pdv      ClientPDV @relation(fields: [pdvId], references: [id])
+  receipts Receipt[]
+  rewards  Reward[]
+
+  @@map("loyalty_customers")
+}
+
+enum LoyaltyLevel {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+  DIAMOND
+}
+
+model Receipt {
+  id            String   @id @default(cuid())
+  customerId    String
+  amount        Float
+  itemsCount    Int
+  items         Json?
+  photoUrl      String
+  aiProcessed   Boolean  @default(false)
+  aiConfidence  Float?
+  aiProcessedAt DateTime?
+  pointsEarned  Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  customer LoyaltyCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("receipts")
+}
+
+model Reward {
+  id          String      @id @default(cuid())
+  customerId  String
+  type        RewardType
+  name        String
+  value       Float
+  pointsCost  Int
+  deliveredAt DateTime?
+  qrCode      String?
+  createdAt   DateTime    @default(now())
+
+  customer LoyaltyCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("rewards")
+}
+
+enum RewardType {
+  DISCOUNT
+  PRODUCT
+  CASHBACK
+  SPECIAL_OFFER
+}
+
+// ============ INCIDENCIAS Y EXHIBICIONES ============
+
+model Incident {
+  id          String           @id @default(cuid())
+  visitId     String
+  type        IncidentType
+  severity    IncidentSeverity @default(MEDIUM)
+  description String
+  photoUrl    String?
+  status      IncidentStatus   @default(OPEN)
+  resolvedAt  DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@map("incidents")
+}
+
+enum IncidentType {
+  OUT_OF_STOCK
+  EXPIRED_PRODUCT
+  PRICING_ERROR
+  DAMAGED_PRODUCT
+  COMPETITOR_ACTIVITY
+  OTHER
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+model Exhibition {
+  id          String          @id @default(cuid())
+  visitId     String
+  type        ExhibitionType
+  status      ExhibitionStatus
+  photoUrl    String
+  aiVerified  Boolean         @default(false)
+  aiConfidence Float?
+  notes       String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@map("exhibitions")
+}
+
+enum ExhibitionType {
+  SHELF
+  ENDCAP
+  DISPLAY
+  COOLER
+  PROMOTIONAL
+}
+
+enum ExhibitionStatus {
+  PENDING
+  INSTALLED
+  VERIFIED
+  REMOVED
+}
