@@ -13,7 +13,7 @@ Tu base de datos Neon PostgreSQL está **completamente configurada y lista** par
 
 **Connection String** (ya configurado en `.env`):
 ```
-postgresql://neondb_owner:npg_YbfDseal70dr@ep-cold-shadow-af4ug03a-pooler.c-2.us-west-2.aws.neon.tech/neondb?channel_binding=require&sslmode=require
+postgresql://[USERNAME]:[PASSWORD]@[HOST]/[DATABASE]?channel_binding=require&sslmode=require
 ```
 
 ### 🏗️ Tablas Creadas (17 total)
@@ -50,7 +50,7 @@ postgresql://neondb_owner:npg_YbfDseal70dr@ep-cold-shadow-af4ug03a-pooler.c-2.us
 ## 👤 Usuario Admin Creado
 
 **Email**: `admin@agente.com`  
-**Password**: `admin123`  
+**Password**: `[CONFIGURE_IN_ENV]`  
 **Role**: `ADMIN`
 
 ---
@@ -103,7 +103,7 @@ postgresql://neondb_owner:npg_YbfDseal70dr@ep-cold-shadow-af4ug03a-pooler.c-2.us
 2. **Login**:
    - Ve a [http://localhost:3000](http://localhost:3000)
    - Email: `admin@agente.com`
-   - Password: `admin123`
+   - Password: `[CONFIGURE_IN_ENV]`
 
 3. **Explorar funcionalidades**:
    - ✅ Dashboard con datos reales
